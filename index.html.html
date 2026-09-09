@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>EAP Editável v2 - TCC Monitoramento Energético</title>
+
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+<style>
+  :root{
+    --blue:#0b4a7a;
+    --blue2:#0f5b92;
+    --light:#d9edff;
+    --light2:#edf7ff;
+    --green:#63b52d;
+    --text:#16324a;
+    --bg:#f7fafc;
+    --panel:#ffffff;
+    --border:#cbd5e1;
+    --orange:#f59e0b;
+  }
+
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--text)}
+  body{overflow:hidden}
+
+  header{
+    height:64px;background:#fff;border-bottom:1px solid #e2e8f0;
+    display:flex;align-items:center;gap:8px;padding:10px 12px;flex-wrap:wrap;z-index:1000;position:relative
+  }
+
+  header h1{font-size:16px;margin:0 12px 0 0;white-space:nowrap}
+  button,.file-label{
+    border:1px solid var(--border);background:#fff;border-radius:8px;padding:8px 10px;
+    cursor:pointer;font-size:13px
+  }
+  button:hover,.file-label:hover{background:#eef5fb}
+  .primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+  .danger{color:#a11}
+  #fileInput{display:none}
+
+  .workspace{
+    display:grid;grid-template-columns:minmax(0,1fr) 330px;height:calc(100vh - 64px)
+  }
+
+  #viewport{
+    position:relative;overflow:auto;background:
+      linear-gradient(#edf2f7 1px,transparent 1px),
+      linear-gradient(90deg,#edf2f7 1px,transparent 1px);
+    background-size:24px 24px;
+  }
+
+  #stage{
+    position:relative;width:2800px;height:1800px;transform-origin:0 0;
+  }
+
+  #connections{
+    position:absolute;left:0;top:0;width:100%;height:100%;
+    overflow:visible;pointer-events:none;z-index:1
+  }
+
+  .node{
+    position:absolute;z-index:3;width:220px;min-height:62px;border-radius:12px;
+    background:var(--light);border:2px solid transparent;
+    box-shadow:0 3px 10px rgba(15,35,60,.10);
+    cursor:grab;user-select:none;
+    display:flex;align-items:center;justify-content:center;text-align:center;
+    padding:10px 32px 10px 12px;font-weight:600;line-height:1.15
+  }
+  .node.dragging{cursor:grabbing;opacity:.92;box-shadow:0 8px 20px rgba(0,0,0,.18)}
+  .node.root{
+    width:500px;min-height:90px;background:var(--blue);color:#fff;font-size:20px;font-weight:700
+  }
+  .node.group{
+    width:240px;min-height:76px;background:var(--blue);color:#fff;font-size:16px;font-weight:700
+  }
+  .node.level2{background:var(--light2);font-size:13px}
+  .node.selected{border-color:var(--orange);outline:2px solid #fde68a}
+
+  .collapse-btn{
+    position:absolute;right:7px;top:7px;width:22px;height:22px;border-radius:50%;
+    border:none;background:rgba(255,255,255,.9);color:#1e3a5f;
+    font-weight:700;display:flex;align-items:center;justify-content:center;padding:0;
+    box-shadow:0 1px 3px rgba(0,0,0,.15)
+  }
+  .group .collapse-btn,.root .collapse-btn{background:rgba(255,255,255,.95)}
+  .collapse-btn:hover{background:#fff}
+
+  .node-code{
+    display:block;font-size:11px;opacity:.75;margin-bottom:4px;font-weight:700
+  }
+  .root .node-code,.group .node-code{opacity:.9}
+
+  aside{
+    background:#fff;border-left:1px solid #e2e8f0;padding:16px;overflow:auto
+  }
+  aside h2{font-size:17px;margin:0 0 10px}
+  .muted{font-size:12px;color:#64748b;line-height:1.4}
+  .field{margin-bottom:12px}
+  .field label{display:block;font-size:12px;font-weight:700;margin-bottom:5px}
+  .field input,.field textarea,.field select{
+    width:100%;border:1px solid var(--border);border-radius:8px;padding:9px;font:inherit
+  }
+  .field textarea{min-height:88px;resize:vertical}
+
+  .statusbar{
+    position:fixed;bottom:12px;left:12px;background:rgba(255,255,255,.94);
+    border:1px solid #dbe3ec;border-radius:8px;padding:6px 10px;font-size:12px;z-index:50
+  }
+
+  .hint{
+    position:fixed;bottom:12px;left:120px;background:rgba(255,255,255,.94);
+    border:1px solid #dbe3ec;border-radius:8px;padding:6px 10px;font-size:12px;z-index:50
+  }
+
+  @media(max-width:900px){
+    .workspace{grid-template-columns:1fr}
+    aside{
+      position:fixed;right:10px;top:78px;width:310px;max-height:75vh;
+      border:1px solid #ddd;border-radius:12px;z-index:100
+    }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>EAP Editável — TCC</h1>
+  <button class="primary" onclick="addChild()">+ Subtópico</button>
+  <button onclick="addGroup()">+ Grupo</button>
+  <button onclick="duplicateNode()">Duplicar</button>
+  <button class="danger" onclick="deleteNode()">Excluir</button>
+  <button onclick="autoLayout()">Auto-organizar</button>
+  <button onclick="expandAll()">Expandir tudo</button>
+  <button onclick="collapseAll()">Recolher tudo</button>
+  <button onclick="zoomIn()">Zoom +</button>
+  <button onclick="zoomOut()">Zoom -</button>
+  <button onclick="resetView()">Centralizar</button>
+  <button onclick="exportPNG()">Exportar PNG</button>
+  <button onclick="exportPDF()">Exportar PDF</button>
+  <button onclick="exportJSON()">Exportar JSON</button>
+  <label class="file-label">Importar JSON<input id="fileInput" type="file" accept=".json" onchange="importJSON(event)"></label>
+</header>
+
+<div class="workspace">
+  <div id="viewport">
+    <div id="stage">
+      <svg id="connections"></svg>
+      <div id="nodesLayer"></div>
+    </div>
+  </div>
+
+  <aside>
+    <h2>Detalhes do item</h2>
+    <p class="muted">
+      Clique em um bloco para editar. Arraste qualquer bloco para reposicioná-lo.
+      Os conectores acompanham automaticamente.
+    </p>
+
+    <div class="field"><label>Código</label><input id="code" disabled></div>
+    <div class="field"><label>Título</label><input id="title" oninput="updateSelected()"></div>
+    <div class="field"><label>Descrição</label><textarea id="description" oninput="updateSelected()"></textarea></div>
+    <div class="field">
+      <label>Status</label>
+      <select id="status" onchange="updateSelected()">
+        <option>Não iniciado</option>
+        <option>Em andamento</option>
+        <option>Concluído</option>
+      </select>
+    </div>
+    <div class="field"><label>Responsável</label><input id="responsible" oninput="updateSelected()"></div>
+    <div class="field"><label>Data de início</label><input id="startDate" type="date" onchange="updateSelected()"></div>
+    <div class="field"><label>Data prevista</label><input id="endDate" type="date" onchange="updateSelected()"></div>
+    <div class="field"><label>Observações</label><textarea id="notes" oninput="updateSelected()"></textarea></div>
+  </aside>
+</div>
+
+<div class="statusbar" id="statusbar">Zoom: 100%</div>
+<div class="hint">Dica: arraste os blocos livremente</div>
+
+<script>
+function makeNode(title){
+  return {
+    id:crypto.randomUUID(), title, description:"", status:"Não iniciado",
+    responsible:"", startDate:"", endDate:"", notes:"",
+    children:[], x:null, y:null, collapsed:false
+  };
+}
+
+const initialData = {
+  id:"root",
+  title:"Sistema Inteligente de Monitoramento e Gestão de Consumo Energético",
+  description:"Projeto de TCC",
+  status:"Em andamento",responsible:"",startDate:"",endDate:"",notes:"",
+  x:1150,y:50,collapsed:false,
+  children:[
+    {id:crypto.randomUUID(),title:"Planejamento",children:[
+      "Definição do problema","Definição dos objetivos","Levantamento de requisitos","Planejamento do projeto","Definição da arquitetura","Viabilidade técnica e econômica"
+    ].map(makeNode)},
+    {id:crypto.randomUUID(),title:"Sistema IoT (ESP32 e PZEM-004T)",children:[
+      "Estudo e seleção dos componentes","Montagem do hardware","Configuração do ESP32 (Wi-Fi)","Comunicação com o PZEM-004T","Aquisição das grandezas elétricas","Tratamento dos dados no ESP32","Testes e validação das medições"
+    ].map(makeNode)},
+    {id:crypto.randomUUID(),title:"Comunicação (MQTT)",children:[
+      "Configuração do broker MQTT","Definição dos tópicos","Estrutura das mensagens (JSON)","Implementação da publicação","Intervalo de envio dos dados","Reconexão automática","Testes de comunicação"
+    ].map(makeNode)},
+    {id:crypto.randomUUID(),title:"Back-end (Servidor e API)",children:[
+      "Estrutura do servidor","Recebimento dos dados MQTT","Tratamento e validação dos dados","Desenvolvimento da API","Integração com o banco de dados","Testes do back-end"
+    ].map(makeNode)},
+    {id:crypto.randomUUID(),title:"Banco de Dados",children:[
+      "Modelagem dos dados","Criação das tabelas/coleções","Armazenamento das medições","Consulta ao histórico","Backup e segurança","Testes e integridade dos dados"
+    ].map(makeNode)},
+    {id:crypto.randomUUID(),title:"Front-end (Dashboard)",children:[
+      "Definição do layout","Tela principal (em tempo real)","Gráficos e indicadores","Histórico de consumo","Estimativa de custo","Alertas e notificações","Testes de usabilidade"
+    ].map(makeNode)},
+    {id:crypto.randomUUID(),title:"Integração, Testes e Documentação",children:[
+      "Integração de todos os módulos","Testes funcionais","Testes de desempenho","Correção de falhas","Documentação técnica","Relatório do TCC","Apresentação final"
+    ].map(makeNode)},
+    {id:crypto.randomUUID(),title:"Evoluções Futuras (IA e Expansão)",children:[
+      "Análise inteligente dos dados","Detecção de anomalias","Previsão de consumo","Expansão para múltiplos dispositivos"
+    ].map(makeNode)}
+  ]
+};
+
+function normalize(n){
+  n.description ??=""; n.status ??="Não iniciado"; n.responsible ??="";
+  n.startDate ??=""; n.endDate ??=""; n.notes ??="";
+  n.children ??=[]; n.x ??=null; n.y ??=null; n.collapsed ??=false;
+  n.children.forEach(normalize); return n;
+}
+
+let data = normalize(JSON.parse(JSON.stringify(initialData)));
+let selectedId="root";
+let zoom=1;
+let dragState=null;
+
+function findNode(id,node=data,parent=null,depth=0){
+  if(node.id===id) return {node,parent,depth};
+  for(const c of node.children||[]){
+    const r=findNode(id,c,node,depth+1); if(r) return r;
+  }
+  return null;
+}
+
+function codeMap(){
+  const m=new Map([["root","TCC"]]);
+  function walk(node,prefix){
+    (node.children||[]).forEach((c,i)=>{
+      const code=prefix?`${prefix}.${i+1}`:`${i+1}`;
+      m.set(c.id,code); walk(c,code);
+    });
+  }
+  walk(data,""); return m;
+}
+
+function visibleIds(){
+  const ids=new Set();
+  function walk(n,visible=true){
+    if(!visible)return;
+    ids.add(n.id);
+    if(!n.collapsed) (n.children||[]).forEach(c=>walk(c,true));
+  }
+  walk(data,true);
+  return ids;
+}
+
+function autoLayout(){
+  const rootW=500, groupW=240, gapX=70, startX=70;
+  data.x=1100; data.y=40;
+
+  data.children.forEach((g,i)=>{
+    g.x=startX+i*(groupW+gapX);
+    g.y=190;
+    layoutChildren(g,g.x,300,0);
+  });
+  render();
+}
+
+function layoutChildren(parent,baseX,baseY,depth){
+  const spacingY=82;
+  (parent.children||[]).forEach((c,i)=>{
+    c.x=baseX + (depth>0?35:0);
+    c.y=baseY + i*spacingY;
+    layoutChildren(c,c.x+35,c.y+68,depth+1);
+  });
+}
+
+function render(){
+  const layer=document.getElementById("nodesLayer");
+  const map=codeMap();
+  const visible=visibleIds();
+  layer.innerHTML="";
+
+  function walk(n,depth=0){
+    if(!visible.has(n.id))return;
+
+    if(n.x==null || n.y==null) autoLayoutSilent();
+
+    const el=document.createElement("div");
+    el.className="node"+(n.id==="root"?" root":depth===1?" group":depth>2?" level2":"")+(selectedId===n.id?" selected":"");
+    el.dataset.id=n.id;
+    el.style.left=n.x+"px";
+    el.style.top=n.y+"px";
+
+    const code=map.get(n.id)||"";
+    el.innerHTML=`<div><span class="node-code">${escapeHtml(code)}</span>${escapeHtml(n.title)}</div>`;
+
+    if((n.children||[]).length){
+      const b=document.createElement("button");
+      b.className="collapse-btn";
+      b.textContent=n.collapsed?"+":"−";
+      b.title=n.collapsed?"Expandir":"Recolher";
+      b.onclick=(e)=>{e.stopPropagation();n.collapsed=!n.collapsed;render();};
+      el.appendChild(b);
+    }
+
+    el.addEventListener("mousedown",startDrag);
+    el.addEventListener("click",(e)=>{
+      if(e.target.classList.contains("collapse-btn"))return;
+      if(!dragState) selectNode(n.id);
+    });
+
+    layer.appendChild(el);
+    if(!n.collapsed) (n.children||[]).forEach(c=>walk(c,depth+1));
+  }
+
+  walk(data,0);
+  requestAnimationFrame(drawConnections);
+  refreshPanel();
+  saveLocal();
+}
+
+function autoLayoutSilent(){
+  const rootW=500, groupW=240, gapX=70, startX=70;
+  data.x=1100; data.y=40;
+  data.children.forEach((g,i)=>{
+    g.x=startX+i*(groupW+gapX);
+    g.y=190;
+    layoutChildren(g,g.x,300,0);
+  });
+}
+
+function drawConnections(){
+  const svg=document.getElementById("connections");
+  svg.innerHTML="";
+  const visible=visibleIds();
+
+  function addLine(parent,child){
+    if(!visible.has(parent.id)||!visible.has(child.id))return;
+    const pEl=document.querySelector(`.node[data-id="${parent.id}"]`);
+    const cEl=document.querySelector(`.node[data-id="${child.id}"]`);
+    if(!pEl||!cEl)return;
+
+    const x1=parent.x + pEl.offsetWidth/2;
+    const y1=parent.y + pEl.offsetHeight;
+    const x2=child.x + cEl.offsetWidth/2;
+    const y2=child.y;
+    const mid=(y1+y2)/2;
+
+    const path=document.createElementNS("http://www.w3.org/2000/svg","path");
+    path.setAttribute("d",`M ${x1} ${y1} V ${mid} H ${x2} V ${y2}`);
+    path.setAttribute("fill","none");
+    path.setAttribute("stroke","#63b52d");
+    path.setAttribute("stroke-width","3");
+    path.setAttribute("stroke-linejoin","round");
+    path.setAttribute("stroke-linecap","round");
+    svg.appendChild(path);
+  }
+
+  function walk(n){
+    if(n.collapsed)return;
+    for(const c of n.children||[]){
+      addLine(n,c); walk(c);
+    }
+  }
+  walk(data);
+}
+
+function startDrag(e){
+  if(e.button!==0 || e.target.classList.contains("collapse-btn"))return;
+  const id=e.currentTarget.dataset.id;
+  const f=findNode(id); if(!f)return;
+
+  selectedId=id;
+  const startX=e.clientX, startY=e.clientY;
+  const ox=f.node.x, oy=f.node.y;
+  const el=e.currentTarget;
+  el.classList.add("dragging");
+
+  dragState={id,startX,startY,ox,oy,el,moved:false};
+
+  const move=(ev)=>{
+    if(!dragState)return;
+    const dx=(ev.clientX-startX)/zoom;
+    const dy=(ev.clientY-startY)/zoom;
+    if(Math.abs(dx)>2||Math.abs(dy)>2) dragState.moved=true;
+    f.node.x=Math.max(0,ox+dx);
+    f.node.y=Math.max(0,oy+dy);
+    el.style.left=f.node.x+"px";
+    el.style.top=f.node.y+"px";
+    drawConnections();
+  };
+
+  const up=()=>{
+    if(!dragState)return;
+    dragState.el.classList.remove("dragging");
+    dragState=null;
+    document.removeEventListener("mousemove",move);
+    document.removeEventListener("mouseup",up);
+    render();
+  };
+
+  document.addEventListener("mousemove",move);
+  document.addEventListener("mouseup",up);
+}
+
+function selectNode(id){selectedId=id;render();}
+
+function refreshPanel(){
+  const f=findNode(selectedId); if(!f)return;
+  const n=f.node, map=codeMap();
+  document.getElementById("code").value=map.get(n.id)||"";
+  for(const k of ["title","description","status","responsible","startDate","endDate","notes"]){
+    const el=document.getElementById(k); if(el) el.value=n[k]||"";
+  }
+}
+
+function updateSelected(){
+  const f=findNode(selectedId); if(!f)return;
+  for(const k of ["title","description","status","responsible","startDate","endDate","notes"]){
+    const el=document.getElementById(k); if(el) f.node[k]=el.value;
+  }
+  render();
+}
+
+function addChild(){
+  const f=findNode(selectedId); if(!f)return;
+  const c=makeNode("Novo subtópico");
+  c.x=f.node.x+30; c.y=f.node.y+110+(f.node.children?.length||0)*75;
+  f.node.children.push(c);
+  f.node.collapsed=false;
+  selectedId=c.id; render();
+}
+
+function addGroup(){
+  const g=makeNode("Novo grupo");
+  g.x=80+data.children.length*310; g.y=190;
+  data.children.push(g);
+  selectedId=g.id; render();
+}
+
+function deleteNode(){
+  if(selectedId==="root"){alert("O nó raiz do TCC não pode ser excluído.");return}
+  const f=findNode(selectedId); if(!f||!f.parent)return;
+  f.parent.children=f.parent.children.filter(x=>x.id!==selectedId);
+  selectedId="root"; render();
+}
+
+function duplicateNode(){
+  if(selectedId==="root")return;
+  const f=findNode(selectedId); if(!f||!f.parent)return;
+  const copy=JSON.parse(JSON.stringify(f.node));
+  function renew(n){
+    n.id=crypto.randomUUID(); n.x=(n.x??0)+35; n.y=(n.y??0)+35;
+    (n.children||[]).forEach(renew);
+  }
+  renew(copy);
+  const idx=f.parent.children.findIndex(x=>x.id===selectedId);
+  f.parent.children.splice(idx+1,0,copy);
+  selectedId=copy.id; render();
+}
+
+function expandAll(){
+  function walk(n){n.collapsed=false;(n.children||[]).forEach(walk)} walk(data);render();
+}
+function collapseAll(){
+  function walk(n,depth=0){
+    n.collapsed=depth<2 && (n.children||[]).length>0;
+    (n.children||[]).forEach(c=>walk(c,depth+1));
+  }
+  walk(data); data.collapsed=false; render();
+}
+
+function zoomIn(){zoom=Math.min(1.8,zoom+.1);applyZoom()}
+function zoomOut(){zoom=Math.max(.5,zoom-.1);applyZoom()}
+function applyZoom(){
+  document.getElementById("stage").style.transform=`scale(${zoom})`;
+  document.getElementById("statusbar").textContent=`Zoom: ${Math.round(zoom*100)}%`;
+}
+function resetView(){
+  zoom=1;applyZoom();
+  const vp=document.getElementById("viewport");
+  vp.scrollTo({left:850,top:0,behavior:"smooth"});
+}
+
+function exportJSON(){
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);a.download="EAP_TCC_editavel_v2.json";a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function importJSON(e){
+  const file=e.target.files[0]; if(!file)return;
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      data=normalize(JSON.parse(r.result));selectedId="root";render();
+    }catch(err){alert("Arquivo JSON inválido.");}
+  };
+  r.readAsText(file);
+}
+
+async function captureStage(){
+  if(typeof html2canvas==="undefined"){
+    alert("Não foi possível carregar o módulo de exportação. Verifique sua conexão com a internet.");
+    throw new Error("html2canvas indisponível");
+  }
+
+  const stage=document.getElementById("stage");
+  const oldTransform=stage.style.transform;
+  stage.style.transform="scale(1)";
+  await new Promise(r=>setTimeout(r,60));
+
+  const canvas=await html2canvas(stage,{
+    backgroundColor:"#ffffff",
+    scale:1.2,
+    useCORS:true,
+    logging:false
+  });
+
+  stage.style.transform=oldTransform;
+  return canvas;
+}
+
+async function exportPNG(){
+  try{
+    const canvas=await captureStage();
+    const a=document.createElement("a");
+    a.download="EAP_TCC_completa.png";
+    a.href=canvas.toDataURL("image/png");
+    a.click();
+  }catch(e){}
+}
+
+async function exportPDF(){
+  try{
+    const canvas=await captureStage();
+    if(!window.jspdf?.jsPDF){
+      alert("Não foi possível carregar o módulo de PDF. Verifique sua conexão com a internet.");
+      return;
+    }
+    const {jsPDF}=window.jspdf;
+    const img=canvas.toDataURL("image/png");
+    const landscape=canvas.width>=canvas.height;
+    const pdf=new jsPDF({
+      orientation:landscape?"landscape":"portrait",
+      unit:"px",
+      format:[canvas.width,canvas.height],
+      hotfixes:["px_scaling"]
+    });
+    pdf.addImage(img,"PNG",0,0,canvas.width,canvas.height);
+    pdf.save("EAP_TCC_completa.pdf");
+  }catch(e){}
+}
+
+function saveLocal(){
+  localStorage.setItem("eapTccDataV2",JSON.stringify(data));
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g,m=>({
+    "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"
+  }[m]));
+}
+
+const saved=localStorage.getItem("eapTccDataV2");
+if(saved){try{data=normalize(JSON.parse(saved))}catch(e){}}
+if(data.children.some(g=>g.x==null)) autoLayoutSilent();
+render();applyZoom();
+setTimeout(resetView,100);
+</script>
+</body>
+</html>
